@@ -1,0 +1,2 @@
+const {db,auth,requireAdmin,send,fail}=require('../_lib');
+module.exports=async(req,res)=>{if(req.method!=='POST')return send(res,405,{ok:false});try{const a=await auth(req);requireAdmin(a);const [w,s,u]=await Promise.all([db().ref('withdrawals').once('value'),db().ref('submissions').once('value'),db().ref('users').once('value')]);send(res,200,{ok:true,withdrawals:Object.values(w.val()||{}),submissions:Object.values(s.val()||{}),userCount:Object.keys(u.val()||{}).length});}catch(e){fail(res,e)}};
