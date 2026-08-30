@@ -1,2 +1,0 @@
-const {db,auth,requireAdmin,send,fail}=require('../_lib');
-module.exports=async(req,res)=>{if(req.method!=='POST')return send(res,405,{ok:false});try{const a=await auth(req);requireAdmin(a);const {uid,title,message,type='info'}=req.body||{};if(!uid||!title||!message)throw Object.assign(new Error('Recipient, title and message required'),{status:400});const ref=db().ref('notifications/'+uid).push();await ref.set({id:ref.key,title,message,type,read:false,createdAt:Date.now(),from:a.uid});send(res,200,{ok:true,id:ref.key});}catch(e){fail(res,e)}};
