@@ -40,9 +40,9 @@ export default function Home(){
  const [turn,setTurn]=useState(0);
  const [dice,setDice]=useState(0);
  const [rolling,setRolling]=useState(false);
- const [coins,setCoins]=useState(()=>Number(localStorage.getItem("lp-coins")||"1000"));
+ const [coins,setCoins]=useState(1000);
  const [msg,setMsg]=useState("Your turn — roll the dice");
- useEffect(()=>localStorage.setItem("lp-coins",String(coins)),[coins]);
+ useEffect(()=>{\n   if(typeof window==="undefined")return;\n   const saved=window.localStorage.getItem("lp-coins");\n   if(saved!==null)setCoins(Number(saved)||1000);\n },[]);\n useEffect(()=>{\n   if(typeof window!=="undefined")window.localStorage.setItem("lp-coins",String(coins));\n },[coins]);
 
  function reset(){setPlayers(initial.map(p=>({...p,tokens:p.tokens.map(t=>({...t}))})));setTurn(0);setDice(0);setMsg("Your turn — roll the dice");}
  function roll(){
