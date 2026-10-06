@@ -1,234 +1,76 @@
-"use client";
+ "use client";
+import {useEffect,useMemo,useState} from "react";
+import {Howl} from "howler";
+import {COLORS,HOME,PATH,Player,PlayerColor,Token,canMove,chooseAiMove,pathIndex,rollDice,step,winner} from "../lib/game";
 
-import { useEffect, useMemo, useState } from "react";
-import { Howl } from "howler";
-import {
-  applyMove, COLORS, Difficulty, loadProfile, makePlayers, Mode, Player,
-  Power, reactionFor, rollDice, usePower, winner, canMove
-} from "../lib/game";
+const sounds:any={};
+function sfx(name:string){
+  try{
+    const src=`/sounds/${name}.mp3`;
+    sounds[name] ||= new Howl({src:[src],volume:.55});
+    sounds[name].play();
+  }catch{}
+}
+const initial:Player[]=[
+ {color:"red",name:"YOU",tokens:[0,1,2,3].map(id=>({id,progress:0}))},
+ {color:"green",name:"BIRYANI BOT",bot:true,difficulty:"Easy",tokens:[0,1,2,3].map(id=>({id,progress:0}))},
+ {color:"yellow",name:"CHAI BOT",bot:true,difficulty:"Hard",tokens:[0,1,2,3].map(id=>({id,progress:0}))},
+ {color:"blue",name:"PAAN BOT",bot:true,difficulty:"Desi",tokens:[0,1,2,3].map(id=>({id,progress:0}))},
+];
 
-type Profile = {
-  coins: number; xp: number; wins: number; games: number; kills: number;
-  sixes: number; streak: number; premium: boolean;
-};
-
-const defaultProfile: Profile = {
-  coins: 500, xp: 0, wins: 0, games: 0, kills: 0, sixes: 0, streak: 0, premium: false
-};
-
-const sound = (file: string) => {
-  try { new Howl({ src: [file], volume: .65 }).play(); } catch {}
-};
-
-const emojis: Record<string,string> = { red:"🐶", yellow:"🐱", green:"🐸", blue:"🐼" };
-
-export default function Home() {
-  const [mode, setMode] = useState<Mode>("solo");
-  const [difficulty, setDifficulty] = useState<Difficulty>("desi");
-  const [players, setPlayers] = useState<Player[]>(() => makePlayers("solo", "desi"));
-  const [turn, setTurn] = useState(0);
-  const [dice, setDice] = useState<number | null>(null);
-  const [rolling, setRolling] = useState(false);
-  const [message, setMessage] = useState("Roll the dice!");
-  const [reaction, setReaction] = useState("LET'S GO!");
-  const [started, setStarted] = useState(false);
-  const [selected, setSelected] = useState(0);
-  const [profile, setProfile] = useState<Profile>(defaultProfile);
-  const [menu, setMenu] = useState(false);
-
-  useEffect(() => {
-    setProfile(loadProfile(defaultProfile));
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("ludo-party-profile", JSON.stringify(profile));
-  }, [profile]);
-
-  const current = players[turn];
-  const legal = useMemo(
-    () => dice ? current.tokens.map(t => canMove(t, dice)) : [false,false,false,false],
-    [dice, current]
-  );
-
-  function newGame(m = mode, d = difficulty) {
-    const ps = makePlayers(m, d);
-    setPlayers(ps); setTurn(0); setDice(null); setStarted(true); setSelected(0);
-    setMessage("New game started!"); setReaction("LET'S GO!");
-    setProfile(p => ({...p, games: p.games + 1}));
-  }
-
-  function nextTurn(extra = false) {
-    if (extra) {
-      setDice(null);
-      setMessage("SIX! Roll again 😎");
-      setReaction(reactionFor("six"));
-      return;
-    }
-    setDice(null);
-    setTurn(t => (t + 1) % 4);
-  }
-
-  function doRoll() {
-    if (!started || rolling || dice !== null || current.bot) return;
-    setRolling(true); sound("/sounds/dice-roll.mp3");
-    window.setTimeout(() => {
-      const d = rollDice();
-      setDice(d); setRolling(false);
-      setReaction(d === 6 ? reactionFor("six") : reactionFor("roll"));
-      if (d === 6) setProfile(p => ({...p, sixes:p.sixes+1}));
-      if (!players[turn].tokens.some(t => canMove(t,d))) {
-        setMessage("No legal move — OOPS!");
-        setReaction(reactionFor("oops"));
-        window.setTimeout(() => nextTurn(false), 700);
-      } else setMessage(`You rolled ${d}. Pick a token.`);
-    }, 550);
-  }
-
-  function moveToken(ti: number) {
-    if (dice === null || !legal[ti] || current.bot) return;
-    const result = applyMove(players, turn, ti, dice);
-    setPlayers(result.players);
-    sound(result.killed ? "/sounds/kill-ouch.mp3" : "/sounds/oops.mp3");
-    if (result.killed) {
-      setReaction(reactionFor("kill"));
-      setProfile(p => ({...p, kills:p.kills+1, coins:p.coins+30, xp:p.xp+20}));
-    } else setReaction(reactionFor("move"));
-    const win = winner(result.players[turn]);
-    if (win) {
-      sound("/sounds/win-yeeha.mp3");
-      setReaction(reactionFor("win")); setMessage(`${current.name} WINS! 🏆`);
-      setProfile(p => ({...p, wins:p.wins+1, streak:p.streak+1, coins:p.coins+150, xp:p.xp+100}));
-      setDice(null); return;
-    }
-    nextTurn(dice === 6);
-  }
-
-  function activatePower(power: Power) {
-    if (dice === null || current.bot) return;
-    const result = usePower(players, turn, selected, power);
-    setPlayers(result.players); setMessage(result.message); setReaction(power === "bomb" ? "BOOM!" : "NICE!");
-    setDice(null);
-    nextTurn(false);
-  }
-
-  // Simple visual board: 52 track cells in a loop, plus home/yard corners.
-  const track = Array.from({length:52},(_,i)=>i);
-
-  // Bot turn
-  useEffect(() => {
-    if (!started || !current.bot) return;
-    const timer = window.setTimeout(() => {
-      const d = rollDice();
-      setDice(d); setReaction(d===6 ? reactionFor("six") : reactionFor("roll"));
-      setMessage(`${current.name} rolled ${d}`);
-      const legalIndexes = current.tokens.map((t,i)=>canMove(t,d)?i:-1).filter(i=>i>=0);
-      if (!legalIndexes.length) {
-        window.setTimeout(() => nextTurn(false), 600);
-        return;
-      }
-      let best = legalIndexes[0];
-      if (current.difficulty === "easy") best = legalIndexes[Math.floor(Math.random()*legalIndexes.length)];
-      else {
-        // AI uses the same engine's scoring indirectly by favoring finish/forward/kill.
-        best = legalIndexes.sort((a,b) => {
-          const ta=current.tokens[a], tb=current.tokens[b];
-          return (tb.pos + (tb.pos===-1?10:0)) - (ta.pos + (ta.pos===-1?10:0));
-        })[0];
-      }
-      window.setTimeout(() => {
-        const result = applyMove(players, turn, best, d);
-        setPlayers(result.players);
-        if (result.killed) {
-          setReaction(reactionFor("kill")); setProfile(p=>({...p,kills:p.kills+1}));
-        }
-        if (winner(result.players[turn])) {
-          setReaction(reactionFor("win")); setMessage(`${current.name} wins!`);
-          setProfile(p=>({...p, coins:p.coins+100, xp:p.xp+100}));
-          return;
-        }
-        nextTurn(d===6);
-      }, 600);
-    }, 850);
-    return () => window.clearTimeout(timer);
-  }, [started, current.bot, turn, dice]);
-
-  if (!started) return (
-    <main className="menu">
-      <section className="hero">
-        <div className="logo">🎲 LUDO PARTY</div>
-        <h1>DESI <span>DHAMAKA</span></h1>
-        <p>Modern. Funny. Offline. Full-on Ludo madness.</p>
-        <div className="cards">
-          <button className="modeCard active" onClick={()=>{setMode("solo");newGame("solo",difficulty)}}>🤖<b>Single Player</b><small>3 crazy bots</small></button>
-          <button className="modeCard" onClick={()=>{setMode("pair");newGame("pair",difficulty)}}>🤝<b>Pair 2v2</b><small>Red + Yellow vs Blue + Green</small></button>
-          <button className="modeCard" onClick={()=>{setMode("local");newGame("local",difficulty)}}>👨‍👩‍👧‍👦<b>4 Player</b><small>Pass & play</small></button>
-        </div>
-        <div className="difficulty">
-          <b>AI Difficulty</b>
-          {(["easy","hard","desi"] as Difficulty[]).map(d=><button key={d} className={difficulty===d?"selected":""} onClick={()=>setDifficulty(d)}>{d.toUpperCase()}</button>)}
-        </div>
-        <div className="premiumHint">⭐ Ludo Party Plus — premium-ready, never pay-to-win</div>
-      </section>
-    </main>
-  );
-
-  return (
-    <main className="game">
-      <header>
-        <div><strong>🎲 LUDO PARTY</strong><span> DESI DHAMAKA</span></div>
-        <div className="stats">🪙 {profile.coins} &nbsp; ⭐ XP {profile.xp} &nbsp; 🏆 {profile.wins}</div>
-        <button className="iconBtn" onClick={()=>setMenu(!menu)}>☰</button>
-      </header>
-
-      {menu && <div className="drawer">
-        <h2>Player Stats</h2><p>Games: {profile.games}</p><p>Kills: {profile.kills}</p><p>Sixes: {profile.sixes}</p><p>Win streak: {profile.streak}</p>
-        <button onClick={()=>setProfile(p=>({...p,premium:!p.premium}))}>⭐ Premium Demo: {profile.premium?"ON":"OFF"}</button>
-        <button onClick={()=>newGame()}>🔄 New Game</button>
-      </div>}
-
-      <section className="topbar">
-        <div className={`turnBadge ${current.color}`}>{emojis[current.color]} {current.name}'s turn</div>
-        <div className="bubble">{reaction}</div>
-      </section>
-
-      <section className="boardWrap">
-        <div className="board">
-          <div className="corner redCorner"><span>🔴</span>{players[0].tokens.map((t,i)=><TokenView key={i} t={t} color="red" yard />)}</div>
-          <div className="corner yellowCorner"><span>🟡</span>{players[1].tokens.map((t,i)=><TokenView key={i} t={t} color="yellow" yard />)}</div>
-          <div className="corner greenCorner"><span>🟢</span>{players[2].tokens.map((t,i)=><TokenView key={i} t={t} color="green" yard />)}</div>
-          <div className="corner blueCorner"><span>🔵</span>{players[3].tokens.map((t,i)=><TokenView key={i} t={t} color="blue" yard />)}</div>
-          <div className="track">
-            {track.map(i => {
-              const occupants: {p:Player,t:number}[] = [];
-              players.forEach(p=>p.tokens.forEach((t,ti)=> {
-                if (t.pos === i && t.pos >= 0 && t.pos <= 51) occupants.push({p,t:ti});
-              }));
-              return <div className="cell" key={i}>{occupants.map(o=><div key={o.p.color+o.t} className={`trackToken ${o.p.color}`}>{emojis[o.p.color]}</div>)}</div>
-            })}
-          </div>
-          <div className="home">🏠<b>HOME</b><small>Finish all 4!</small></div>
-        </div>
-      </section>
-
-      <section className="controls">
-        <div className="diceArea">
-          <button className={`dice ${rolling?"roll":""}`} onClick={doRoll} disabled={rolling || dice!==null || current.bot}>
-            {rolling ? "🎲" : dice ?? "🎲"}
-          </button>
-          <small>{current.bot ? "Bot thinking…" : dice===null ? "ROLL DICE" : "SELECT TOKEN"}</small>
-        </div>
-        <div className="tokens">
-          {current.tokens.map((t,i)=><button key={i} disabled={!legal[i] || current.bot} className={`tokenBtn ${current.color} ${legal[i]?"can":""}`} onClick={()=>{setSelected(i);moveToken(i)}}>{emojis[current.color]} {i+1}<small>{t.pos===-1?"YARD":t.finished?"HOME":`STEP ${t.pos}`}</small></button>)}
-        </div>
-        <div className="powers">
-          {(["bomb","rocket","ghost"] as Power[]).map(p=><button key={p} onClick={()=>activatePower(p)} disabled={current.bot || dice===null || !current.powerups.includes(p) || current.tokens[selected].pos<0} className="power">{p==="bomb"?"💣":p==="rocket"?"🚀":"👻"} {p.toUpperCase()}</button>)}
-        </div>
-      </section>
-      <footer><span>{message}</span><button onClick={()=>newGame()}>NEW GAME</button></footer>
-    </main>
-  );
+function Board({players,onToken}:{players:Player[];onToken:(i:number,t:number)=>void}){
+ const cells=useMemo(()=>PATH.map(([r,c],i)=>({r,c,i})),[]);
+ const occ:any={};
+ players.forEach((p,pi)=>p.tokens.forEach(t=>{
+   const x=pathIndex(p.color,t.progress); if(x>=0)(occ[x]??=[]).push({pi,t});
+ }));
+ return <div className="board">
+   <div className="zone red"><b>RED</b></div><div className="zone green"><b>GREEN</b></div>
+   <div className="zone blue"><b>BLUE</b></div><div className="zone yellow"><b>YELLOW</b></div>
+   {cells.map(c=><div key={c.i} className="cell" style={{gridRow:c.r+1,gridColumn:c.c+1}}>
+     {occ[c.i]?.map((o:any)=><button key={`${o.pi}-${o.t.id}`} className={`token ${players[o.pi].color}`} onClick={()=>onToken(o.pi,o.t.id)}>{o.t.id+1}</button>)}
+   </div>)}
+   <div className="center">LUDO<br/><span>PARTY</span></div>
+ </div>
 }
 
-function TokenView({t,color,yard}:{t:any,color:string,yard?:boolean}) {
-  return <div className={`yardToken ${color} ${t.ghost?"ghost":""}`}>{emojis[color]}<small>{t.id+1}</small></div>;
+export default function Home(){
+ const [screen,setScreen]=useState("home");
+ const [players,setPlayers]=useState(initial);
+ const [turn,setTurn]=useState(0);
+ const [dice,setDice]=useState(0);
+ const [rolling,setRolling]=useState(false);
+ const [coins,setCoins]=useState(()=>Number(localStorage.getItem("lp-coins")||"1000"));
+ const [msg,setMsg]=useState("Your turn — roll the dice");
+ useEffect(()=>localStorage.setItem("lp-coins",String(coins)),[coins]);
+
+ function reset(){setPlayers(initial.map(p=>({...p,tokens:p.tokens.map(t=>({...t}))})));setTurn(0);setDice(0);setMsg("Your turn — roll the dice");}
+ function roll(){
+   if(rolling||turn!==0)return;
+   setRolling(true);sfx("dice-roll");
+   setTimeout(()=>{const d=rollDice();setDice(d);setRolling(false);setMsg(d===6?"Six! Choose a token.":"Choose a highlighted token.");},450);
+ }
+ function move(pi:number,tid:number){
+   if(pi!==turn||dice===0)return;
+   const p=players[pi],t=p.tokens[tid];
+   if(!canMove(t,dice))return;
+   const np=players.map((x,i)=>i===pi?({...x,tokens:x.tokens.map((z,j)=>j===tid?step(z,dice):z)}):x);
+   const moved=step(t,dice);
+   if(moved.progress===57)sfx("win-yeeha");
+   setPlayers(np);setDice(0);
+   if(dice!==6)setTurn((turn+1)%4); else setMsg("Six! Roll again.");
+ }
+ useEffect(()=>{
+   if(turn===0||dice!==0)return;
+   const p=players[turn]; const d=rollDice(); setTimeout(()=>{
+     setDice(d);sfx("dice-roll");
+     const t=chooseAiMove(p,d,players.filter((_,i)=>i!==turn));
+     if(t){setTimeout(()=>{const idx=p.tokens.findIndex(x=>x.id===t.id);const np=players.map((x,i)=>i===turn?({...x,tokens:x.tokens.map(z=>z.id===t.id?step(z,d):z)}):x);setPlayers(np);setDice(0);setTurn(d===6?turn:(turn+1)%4)},600)}
+     else {setTimeout(()=>{setDice(0);setTurn((turn+1)%4)},450)}
+   },700);
+ },[turn,dice]);
+
+ if(screen==="home")return <main className="app"><div className="hero"><div className="brand">LUDO <span>PARTY</span></div><p>DESI DHAMAKA • FUTURISTIC EDITION</p><button className="primary" onClick={()=>setScreen("game")}>PLAY OFFLINE</button><button className="secondary" onClick={()=>setScreen("modes")}>GAME MODES</button></div><div className="cards"><div><b>{coins}</b><small>COINS</small></div><div><b>LVL 1</b><small>PROFILE</small></div><div><b>PLUS</b><small>PREMIUM</small></div></div></main>;
+ if(screen==="modes")return <main className="app"><section className="panel"><button className="back" onClick={()=>setScreen("home")}>← BACK</button><h1>GAME MODES</h1><div className="mode" onClick={()=>setScreen("game")}><b>SOLO VS BOTS</b><span>Biryani • Chai • Paan</span></div><div className="mode locked"><b>ONLINE ROOMS</b><span>Realtime multiplayer • coming next</span></div><div className="mode"><b>PASS & PLAY</b><span>4 players on one device</span></div></section></main>;
+ return <main className="game"><header><button className="back" onClick={()=>{reset();setScreen("home")}}>←</button><div><b>LUDO PARTY</b><small>{msg}</small></div><div className="wallet">🪙 {coins}</div></header><div className="arena"><div className="players">{players.map((p,i)=><div className={`player ${p.color} ${turn===i?"active":""}`} key={p.color}><b>{p.name}</b><small>{winner(p)?"WINNER":i===turn?"TURN":"READY"}</small></div>)}</div><Board players={players} onToken={move}/><div className="controls"><div className={`dice ${rolling?"spin":""}`} onClick={roll}>{dice||"?"}</div><button className="primary roll" onClick={roll} disabled={turn!==0||rolling}>ROLL DICE</button><small>Need 6 to launch a token • Safe movement • Fair random dice</small></div></div></main>
 }
